@@ -6,7 +6,7 @@ import math
 from marketstack import getAvailableTickersFromMarketstack, getDailyDataFromMarketstack
 from covid import getPostCovidMaxFromFile, getPostCovidMinFromFile
 import pandas as pd
-
+import logging
 
 def transactionTax(investAmount):
   return (3500+(investAmount*0.008))*1.19
@@ -15,24 +15,24 @@ def getLastFallDelta(dateValueList):
   dateValueList = dateValueList.sort_values(by=['Date'], ascending=False)
   i = 0
   delta = 0
-  print(dateValueList, len(dateValueList))
+  logging.debug(dateValueList)
   while  i < len(dateValueList) - 1:
-    print(i, " -  i: ", dateValueList['Value'][i], "i+1: ", dateValueList['Value'][i+1])
+    #logging.debug(i, " -  i: ", dateValueList['Value'][i], "i+1: ", dateValueList['Value'][i+1])
     if(dateValueList['Value'][i] > dateValueList['Value'][i+1]):
       return delta * -1
     delta = dateValueList['Value'][i] - dateValueList['Value'][i+1]
-    print( "delta: ", delta)
+    logging.debug( "delta: %s", delta)
     i += 1
   return delta
 
 def getAdjustedStocksToBuy(stockPrice, investAmount):
   if stockPrice > 0:
     stocksToBuy = math.floor(investAmount/stockPrice)
-    print("stocksToBuy: ", stocksToBuy)
+    logging.debug("stocksToBuy: %s", stocksToBuy)
     return stocksToBuy
   return 0
 
-def analyseStocks(symbol, investAmount):
+def analyseStocks(symbol, investAmount, thresholdMargin=50000):
   df = getDailyDataFromMarketstack(symbol, '2020-07-01')
 
   if df.empty:
@@ -49,71 +49,75 @@ def analyseStocks(symbol, investAmount):
 
   lastFallDelta = getLastFallDelta(dateValue)
 
-  print("minClose: ", minClose, " maxClose: ", maxClose, "lastClose: ", lastClose, " diffMinMax: ", difMinMax, ' lastFallDelta: ', lastFallDelta)
+  #logging.debug("minClose: ", minClose, " maxClose: ", maxClose, "lastClose: ", lastClose, " diffMinMax: ", difMinMax, ' lastFallDelta: ', lastFallDelta)
 
   ta, tai, taf, amp = detect_cusum(df['Close'], 200, .05, True, False)
 
-  print(ta, tai, taf, amp)
+  #logging.debug(ta, tai, taf, amp)
 
   stocksToBuy = getAdjustedStocksToBuy(lastClose, investAmount)
   totalInvestCost = lastClose*stocksToBuy + transactionTax(investAmount)
-  print("totalinvestcost: ", totalInvestCost)
-
+  
+  logging.debug("totalinvestcost: %s", totalInvestCost)
   potentialStocksSold = maxClose*stocksToBuy + transactionTax(investAmount)
-
   potentialRevenue = potentialStocksSold - totalInvestCost
 
-  print("potentialRevenue: ", potentialRevenue)
+  logging.info("potentialRevenue last fall: %s", potentialRevenue)
 
-  if(int(potentialRevenue) > 40000):
-    print("Comprar")
+  if(int(potentialRevenue) > thresholdMargin):
+    logging.debug("Comprar")
     return ('buy', symbol, lastClose, potentialRevenue)
   
   return ('pass', symbol, lastClose, potentialRevenue)
 
-def analizeCovidContext(symbol, investAmount, lastClose):
+def analizeCovidContext(symbol, investAmount, lastClose, thresholdMargin=50000):
 
   stocksToBuy = getAdjustedStocksToBuy(lastClose, investAmount)
   totalInvestCost = lastClose*stocksToBuy + transactionTax(investAmount)
-  print("totalinvestcostCovid: ", totalInvestCost)
 
-  covidMaxClose = getPostCovidMinFromFile(symbol)
+  logging.debug("totalinvestcostCovid: %s", totalInvestCost)
+
+  covidMaxClose = getPostCovidMaxFromFile(symbol)
   potentialStocksSold = covidMaxClose*stocksToBuy + transactionTax(investAmount)
-
   potentialRevenue = potentialStocksSold - totalInvestCost
 
-  print("potentialRevenueCovid: ", potentialRevenue)
+  logging.info("potentialRevenueCovid: %s", potentialRevenue)
 
-  if(int(potentialRevenue) > 40000):
-    print("Comprar")
+  if(int(potentialRevenue) > thresholdMargin):
+    logging.info("Comprar")
     return ('buy', symbol, potentialRevenue)
   
   return ('pass', symbol, potentialRevenue)
 
 
 def main(argv):
+  logging.basicConfig(level=logging.INFO)
+
+  logging.info('Starting analysis')
 
   availableTickers = getAvailableTickersFromMarketstack()
 
   toBuy = {}
   toBuyCovid = {}
   investAmount = 500000
+  thresholdMargin = 50000
 
   for symbol in availableTickers:
-    print("Analysing stock: ", symbol)
-    (action, symbol, lastClose, revenue) = analyseStocks(symbol, investAmount)
+    logging.info("Analysing stock: %s", symbol)
+    
+    (action, symbol, lastClose, revenue) = analyseStocks(symbol, investAmount, thresholdMargin)
     if(action == 'buy'):
-      print("Adding to buy: ", symbol, revenue)
+      logging.info("Adding to buy: %s - %s", symbol, revenue)
       toBuy[symbol] = revenue
     
-    (action, symbol, revenue) = analizeCovidContext(symbol, investAmount, lastClose)
+    (action, symbol, revenue) = analizeCovidContext(symbol, investAmount, lastClose, thresholdMargin)
     if(action == 'buy'):
-      print("Adding to buy covid: ", symbol, revenue)
+      logging.info("Adding to buy covid: %s - %s", symbol, revenue)
       toBuyCovid[symbol] = revenue
   
-  print(toBuy)
-  print(">>>>>>>>>>>>>>>>>>>>>>>>>")
-  print(toBuyCovid)
+  logging.info(toBuy)
+  logging.info(">>>>>>>>>>>>>>>>>>>>>>>>>")
+  logging.info(toBuyCovid)
 
 if __name__ == "__main__":
     main(sys.argv[1:])
