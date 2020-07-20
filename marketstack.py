@@ -1,8 +1,12 @@
 import requests
 import pandas as pd
 
+symbolToTest = ['PARAUCO.XSGO', 'FALABELLA.XSGO']
 
-def getAvailableTickersFromMarketstack():
+
+def getAvailableTickersFromMarketstack(offline=False):
+  if offline: return symbolToTest
+  
   params = {
     'access_key': 'c130f968b5793fb9767f9c8625253b71',
     'limit': '1000'
@@ -13,14 +17,12 @@ def getAvailableTickersFromMarketstack():
 
   availableTicker = []
   for tickers in api_response['data']['tickers']:
-    #print(tickers['has_eod'])
     if(tickers['has_eod']):
-      #print("Adding: ", tickers['symbol'])
       availableTicker.append(tickers['symbol'])
 
   return availableTicker
   
-def getDailyDataFromMarketstack(symbol, dateFrom, dateTo=''):
+def getDailyDataFromMarketstack(symbol, dateFrom, dateTo='', verbose=False):
   params = {
     'access_key': 'c130f968b5793fb9767f9c8625253b71',
     'symbols': symbol,
@@ -31,9 +33,7 @@ def getDailyDataFromMarketstack(symbol, dateFrom, dateTo=''):
   }
 
   api_result = requests.get('http://api.marketstack.com/v1/eod', params)
-
   api_response = api_result.json()
-
   dataDict = api_response['data']
 
   if not dataDict:
@@ -55,5 +55,7 @@ def getDailyDataFromMarketstack(symbol, dateFrom, dateTo=''):
   df.Close = df.Close.astype(int)
   df.High = df.High.astype(int)
   df.Low = df.Low.astype(int)
+
+  if verbose: print(df)
 
   return df

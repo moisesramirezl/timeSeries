@@ -2,64 +2,11 @@ from detecta import detect_cusum
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
-import requests
-import pandas as pd
 import math
+from marketstack import getAvailableTickersFromMarketstack, getDailyDataFromMarketstack
+from covid import getPostCovidMaxFromFile, getPostCovidMinFromFile
+import pandas as pd
 
-def getAvailableTickersFromMarketstack():
-  params = {
-    'access_key': '6149e9af91483588ecfb15ce01dd434d',
-    'limit': '1000'
-  }
-
-  api_result = requests.get('http://api.marketstack.com/v1/exchanges/xsgo/tickers', params)
-  api_response = api_result.json()
-
-  availableTicker = []
-  for tickers in api_response['data']['tickers']:
-    print(tickers['has_eod'])
-    if(tickers['has_eod']):
-      print("Adding: ", tickers['symbol'])
-      availableTicker.append(tickers['symbol'])
-
-  return availableTicker
-  
-def getDailyDataFromMarketstack(symbol):
-  params = {
-    'access_key': '6149e9af91483588ecfb15ce01dd434d',
-    'symbols': symbol,
-    'sort': 'DESC',
-    'date_from': '2020-07-01',
-    'limit': '1000'
-  }
-
-  api_result = requests.get('http://api.marketstack.com/v1/eod', params)
-
-  api_response = api_result.json()
-
-  dataDict = api_response['data']
-
-  if not dataDict:
-    return pd.DataFrame()
-
-  df = pd.DataFrame.from_dict(dataDict)
-  df = df.reset_index()
-
-  df = df.rename(index=str, columns={"date": "Date", "open": "Open",
-                                        "high": "High", "low": "Low", "close": "Close"})
-                                  
-  df['Date'] = pd.to_datetime(df['Date'])
-  df['Date'] = df['Date'].dt.tz_localize(None)
-
-  df = df.sort_values(by=['Date'])
-
-  #define as int cause does not matter decimal for CLP
-  df.Open = df.Open.astype(int)
-  df.Close = df.Close.astype(int)
-  df.High = df.High.astype(int)
-  df.Low = df.Low.astype(int)
-
-  return df
 
 def transactionTax(investAmount):
   return (3500+(investAmount*0.008))*1.19
@@ -85,13 +32,11 @@ def getAdjustedStocksToBuy(stockPrice, investAmount):
     return stocksToBuy
   return 0
 
-def analyseStocks(symbol):
-  df = getDailyDataFromMarketstack(symbol)
+def analyseStocks(symbol, investAmount):
+  df = getDailyDataFromMarketstack(symbol, '2020-07-01')
 
   if df.empty:
-    return ('empty', symbol, 0)
-
-  investAmount = 500000
+    return ('empty', symbol, 0, 0)
   
   minClose = min(df['Close'])
   maxClose = max(df['Close'])
@@ -122,26 +67,53 @@ def analyseStocks(symbol):
 
   if(int(potentialRevenue) > 40000):
     print("Comprar")
+    return ('buy', symbol, lastClose, potentialRevenue)
+  
+  return ('pass', symbol, lastClose, potentialRevenue)
+
+def analizeCovidContext(symbol, investAmount, lastClose):
+
+  stocksToBuy = getAdjustedStocksToBuy(lastClose, investAmount)
+  totalInvestCost = lastClose*stocksToBuy + transactionTax(investAmount)
+  print("totalinvestcostCovid: ", totalInvestCost)
+
+  covidMaxClose = getPostCovidMinFromFile(symbol)
+  potentialStocksSold = covidMaxClose*stocksToBuy + transactionTax(investAmount)
+
+  potentialRevenue = potentialStocksSold - totalInvestCost
+
+  print("potentialRevenueCovid: ", potentialRevenue)
+
+  if(int(potentialRevenue) > 40000):
+    print("Comprar")
     return ('buy', symbol, potentialRevenue)
   
   return ('pass', symbol, potentialRevenue)
+
 
 def main(argv):
 
   availableTickers = getAvailableTickersFromMarketstack()
 
   toBuy = {}
+  toBuyCovid = {}
+  investAmount = 500000
+
   for symbol in availableTickers:
     print("Analysing stock: ", symbol)
-    (action, symbol, revenue) = analyseStocks(symbol)
+    (action, symbol, lastClose, revenue) = analyseStocks(symbol, investAmount)
     if(action == 'buy'):
       print("Adding to buy: ", symbol, revenue)
       toBuy[symbol] = revenue
+    
+    (action, symbol, revenue) = analizeCovidContext(symbol, investAmount, lastClose)
+    if(action == 'buy'):
+      print("Adding to buy covid: ", symbol, revenue)
+      toBuyCovid[symbol] = revenue
   
   print(toBuy)
-
-
-  
+  print(">>>>>>>>>>>>>>>>>>>>>>>>>")
+  print(toBuyCovid)
 
 if __name__ == "__main__":
     main(sys.argv[1:])
